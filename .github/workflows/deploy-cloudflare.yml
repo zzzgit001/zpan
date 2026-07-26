@@ -169,7 +169,7 @@ jobs:
       - name: Patch wrangler.toml with D1 database ID
         run: sed -i "s/database_id = \"[^\"]*\"/database_id = \"${{ steps.d1.outputs.id }}\"/" wrangler.toml
 
-      - name: Set BETTER_AUTH_SECRET (first deploy only)
+        run: sed -i "s/database_id = \"[^\"]*\"/database_id = \"${{ steps.d1.outputs.id }}\"/" wrangler.toml      - name: Fit Cron triggers within Workers Free limit        # ZPan v2.8.1 defines 6 schedules; Workers Free allows 5. Drop anonymous telemetry only.        run: sed -i 's/, "0 \*\/12 \* \* \*"//' wrangler.toml
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
