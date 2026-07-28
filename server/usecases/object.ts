@@ -374,8 +374,9 @@ export async function completeUpload(
     )
   }
   if (record.uploadId == null) {
-    const reported = params.parts[0]?.etag.replace(/"/g, '')
-    if (!reported || reported !== head.etag) {
+    const reported = params.parts[0]?.etag.trim().replace(/"/g, '').toLowerCase()
+    const stored = head.etag.trim().replace(/"/g, '').toLowerCase()
+    if (!reported || reported !== stored) {
       throw new ObjectUploadSessionError('invalid_state', 'Uploaded object ETag does not match', 'etag_mismatch')
     }
   }

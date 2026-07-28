@@ -92,6 +92,12 @@ describe('mapDomainError', () => {
     const invalid = mapDomainError(new ObjectUploadSessionError('invalid_state'))
     expect(invalid?.status).toBe(409)
     expect(reasonOf(invalid)).toBe('INVALID_STATE')
+    expect(mapDomainError(new ObjectUploadSessionError('invalid_state', undefined, 'etag_mismatch'))?.message).toBe(
+      'Uploaded object ETag does not match',
+    )
+    expect(mapDomainError(new ObjectUploadSessionError('invalid_state', undefined, 'object_not_found'))?.message).toBe(
+      'Uploaded object could not be verified',
+    )
   })
 
   it('maps WebDavPathError to its own status with the canonical default reason', () => {

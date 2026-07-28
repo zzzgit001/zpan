@@ -616,18 +616,18 @@ describe('object usecase', () => {
       expect(activateDraft).toHaveBeenCalledWith('d1', 'o1', 'd1.txt', '', expect.any(Date))
     })
 
-    it('tolerates quoted ETags from the client (strips quotes before comparing)', async () => {
+    it('normalizes quotes, whitespace, and case when comparing ETags', async () => {
       const draft = file('d1', { status: 'draft', size: 100 })
       const { deps } = makeDeps({
         matter: { get: async () => draft, activateDraft: async () => true },
-        s3: { headObject: async () => ({ size: 100, contentType: 'text/plain', etag: 'abc' }) } as Partial<S3Gateway>,
+        s3: { headObject: async () => ({ size: 100, contentType: 'text/plain', etag: ' ABC ' }) } as Partial<S3Gateway>,
         objectUploadSessions: { get: async () => session(), setStatus: async () => {} },
       })
       const out = await completeUpload(deps, {
         orgId: 'o1',
         objectId: 'd1',
         sessionId: 'sess-1',
-        parts: [{ partNumber: 1, etag: '"abc"' }],
+        parts: [{ partNumber: 1, etag: ' "abc" ' }],
         actorId: 'u1',
       })
       expect(out.ok).toBe(true)
