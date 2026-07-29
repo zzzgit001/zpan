@@ -365,23 +365,46 @@ describe('S3Service', () => {
 
   describe('headObject', () => {
     it('returns size, contentType, and the quote-stripped etag', async () => {
-      mockSend.mockResolvedValueOnce({
-        ContentLength: 1024,
-        ContentType: 'image/png',
-        ETag: '"abc123"',
-        $metadata: {},
-      })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValueOnce(
+          new Response(null, {
+            headers: {
+              'content-length': '1024',
+              'content-type': 'image/png',
+              etag: '"abc123"',
+            },
+          }),
+        ),
+      )
       const result = await service.headObject(storage, 'test.png')
       expect(result).toEqual({ size: 1024, contentType: 'image/png', etag: 'abc123' })
-      expect(mockSend).toHaveBeenCalledWith(
-        expect.objectContaining({ input: { Bucket: 'my-bucket', Key: 'test.png' } }),
-      )
+      expect(fetch).toHaveBeenCalledWith('https://signed-url.example.com', { method: 'HEAD' })
+      expect(mockSend).not.toHaveBeenCalled()
     })
 
     it('does not invent a content type when S3 omits it', async () => {
-      mockSend.mockResolvedValueOnce({ $metadata: {} })
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(null)))
       const result = await service.headObject(storage, 'test.bin')
       expect(result).toEqual({ size: 0, contentType: undefined, etag: '' })
+    })
+
+    it('retries a temporarily missing object', async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce(new Response(null, { status: 404 }))
+          .mockResolvedValueOnce(new Response(null, { headers: { 'content-length': '10', etag: '"etag-1"' } })),
+      )
+
+      const result = service.headObject(storage, 'test.bin')
+      await vi.advanceTimersByTimeAsync(250)
+
+      await expect(result).resolves.toEqual({ size: 10, contentType: undefined, etag: 'etag-1' })
+      expect(fetch).toHaveBeenCalledTimes(2)
+      vi.useRealTimers()
     })
   })
 

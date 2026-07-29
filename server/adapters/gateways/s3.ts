@@ -17,6 +17,8 @@ import type { S3Gateway, S3StorageCredentials } from '../../usecases/ports'
 const DEFAULT_EXPIRES_IN = 3600
 const MULTIPART_PART_SIZE = 5 * 1024 * 1024
 const SMALL_STREAM_PUT_BUFFER_SIZE = 256 * 1024
+const HEAD_MAX_ATTEMPTS = 3
+const HEAD_RETRY_DELAY_MS = 250
 
 export class S3Service implements S3Gateway {
   createClient(storage: S3StorageCredentials): S3Client {
@@ -206,12 +208,34 @@ export class S3Service implements S3Gateway {
     key: string,
   ): Promise<{ size: number; contentType?: string; etag: string }> {
     const client = this.createClient(storage)
-    const result = await client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: key }))
-    return {
-      size: result.ContentLength ?? 0,
-      contentType: result.ContentType,
-      etag: (result.ETag ?? '').replace(/"/g, ''),
+    const url = await getSignedUrl(client, new HeadObjectCommand({ Bucket: storage.bucket, Key: key }), {
+      expiresIn: DEFAULT_EXPIRES_IN,
+    })
+    let lastError: Error | undefined
+
+    for (let attempt = 1; attempt <= HEAD_MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await fetch(url, { method: 'HEAD' })
+        if (response.ok) {
+          const contentLength = Number(response.headers.get('content-length') ?? 0)
+          return {
+            size: Number.isFinite(contentLength) ? contentLength : 0,
+            contentType: response.headers.get('content-type') ?? undefined,
+            etag: (response.headers.get('etag') ?? '').replace(/"/g, ''),
+          }
+        }
+        lastError = new Error(`S3 object HEAD failed: ${response.status}`)
+        if (response.status !== 404 && response.status < 500) break
+      } catch (error) {
+        lastError = error as Error
+      }
+
+      if (attempt < HEAD_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, HEAD_RETRY_DELAY_MS * attempt))
+      }
     }
+
+    throw lastError ?? new Error('S3 object HEAD failed')
   }
 
   async getObjectBytes(storage: S3StorageCredentials, key: string, range?: string): Promise<Uint8Array> {
