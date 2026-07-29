@@ -347,9 +347,12 @@ export async function completeUpload(
     actorId: string
   },
 ): Promise<CompleteUploadOutcome> {
-  const { storage } = await loadObjectForUploadSession(deps, params.orgId, params.objectId)
+  const { matter: existingMatter, storage } = await loadObjectForUploadSession(deps, params.orgId, params.objectId)
   const record = await deps.objectUploadSessions.get(params.orgId, params.objectId, params.sessionId)
   if (!record) throw new ObjectUploadSessionError('not_found')
+  if (record.status === 'completed' && existingMatter.status === 'active') {
+    return { ok: true, matter: existingMatter }
+  }
   if (record.status !== 'active') throw new ObjectUploadSessionError('invalid_state')
 
   if (record.uploadId != null) {
@@ -380,8 +383,6 @@ export async function completeUpload(
       throw new ObjectUploadSessionError('invalid_state', 'Uploaded object ETag does not match', 'etag_mismatch')
     }
   }
-  await deps.objectUploadSessions.setStatus(record.id, 'completed')
-
   // Draft → live: reserve quota, apply the stored conflict strategy, activate.
   const { matter, quotaExceeded: exceeded } = await confirmUpload(deps, params.objectId, params.orgId, {
     onConflict: record.onConflict,
@@ -394,6 +395,7 @@ export async function completeUpload(
   if (!matter) {
     return { ok: false, reason: 'not_found' }
   }
+  await deps.objectUploadSessions.setStatus(record.id, 'completed')
   return { ok: true, matter }
 }
 

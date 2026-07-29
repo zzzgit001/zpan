@@ -693,10 +693,11 @@ describe('object usecase', () => {
 
     it('returns quota_exceeded when the activation reservation is rejected', async () => {
       const draft = file('d1', { status: 'draft', size: 50 })
+      const setStatus = vi.fn(async () => {})
       const { deps } = makeDeps({
         matter: { get: async () => draft },
         s3: { headObject: async () => ({ size: 50, contentType: 'text/plain', etag: 'abc' }) } as Partial<S3Gateway>,
-        objectUploadSessions: { get: async () => session(), setStatus: async () => {} },
+        objectUploadSessions: { get: async () => session(), setStatus },
         quota: { incrementUsageIfEffectiveQuotaAllows: async () => false },
       })
       const out = await completeUpload(deps, {
@@ -707,6 +708,49 @@ describe('object usecase', () => {
         actorId: 'u1',
       })
       expectError(out, 422, 'Quota exceeded', 'QUOTA_EXCEEDED')
+      expect(setStatus).not.toHaveBeenCalled()
+    })
+
+    it('does not complete the session when draft activation fails', async () => {
+      const draft = file('d1', { status: 'draft', size: 50 })
+      const setStatus = vi.fn(async () => {})
+      const { deps } = makeDeps({
+        matter: { get: async () => draft, activateDraft: async () => false },
+        s3: { headObject: async () => ({ size: 50, contentType: 'text/plain', etag: 'abc' }) } as Partial<S3Gateway>,
+        objectUploadSessions: { get: async () => session(), setStatus },
+      })
+      const out = await completeUpload(deps, {
+        orgId: 'o1',
+        objectId: 'd1',
+        sessionId: 'sess-1',
+        parts: [{ partNumber: 1, etag: 'abc' }],
+        actorId: 'u1',
+      })
+
+      expect(out).toEqual({ ok: false, reason: 'not_found' })
+      expect(setStatus).not.toHaveBeenCalled()
+    })
+
+    it('is idempotent for a completed session whose matter is already active', async () => {
+      const active = file('d1', { status: 'active', size: 50 })
+      const headObject = vi.fn()
+      const setStatus = vi.fn()
+      const { deps } = makeDeps({
+        matter: { get: async () => active },
+        s3: { headObject } as Partial<S3Gateway>,
+        objectUploadSessions: { get: async () => session({ status: 'completed' }), setStatus },
+      })
+      const out = await completeUpload(deps, {
+        orgId: 'o1',
+        objectId: 'd1',
+        sessionId: 'sess-1',
+        parts: [{ partNumber: 1, etag: 'abc' }],
+        actorId: 'u1',
+      })
+
+      expect(out).toEqual({ ok: true, matter: active })
+      expect(headObject).not.toHaveBeenCalled()
+      expect(setStatus).not.toHaveBeenCalled()
     })
 
     it('propagates a name conflict thrown during activation', async () => {
