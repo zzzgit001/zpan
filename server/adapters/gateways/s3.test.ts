@@ -368,9 +368,11 @@ describe('S3Service', () => {
       vi.stubGlobal(
         'fetch',
         vi.fn().mockResolvedValueOnce(
-          new Response(null, {
+          new Response(new Uint8Array([1]), {
+            status: 206,
             headers: {
-              'content-length': '1024',
+              'content-length': '1',
+              'content-range': 'bytes 0-0/1024',
               'content-type': 'image/png',
               etag: '"abc123"',
             },
@@ -379,14 +381,36 @@ describe('S3Service', () => {
       )
       const result = await service.headObject(storage, 'test.png')
       expect(result).toEqual({ size: 1024, contentType: 'image/png', etag: 'abc123' })
-      expect(fetch).toHaveBeenCalledWith('https://signed-url.example.com', { method: 'HEAD' })
+      expect(fetch).toHaveBeenCalledWith('https://signed-url.example.com', { headers: { Range: 'bytes=0-0' } })
       expect(mockSend).not.toHaveBeenCalled()
     })
 
     it('does not invent a content type when S3 omits it', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(null)))
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValueOnce(
+          new Response(new Uint8Array([1]), {
+            status: 206,
+            headers: { 'content-range': 'bytes 0-0/1' },
+          }),
+        ),
+      )
       const result = await service.headObject(storage, 'test.bin')
-      expect(result).toEqual({ size: 0, contentType: undefined, etag: '' })
+      expect(result).toEqual({ size: 1, contentType: undefined, etag: '' })
+    })
+
+    it('handles an empty object response', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValueOnce(
+          new Response(null, {
+            status: 416,
+            headers: { 'content-range': 'bytes */0', etag: '"empty-etag"' },
+          }),
+        ),
+      )
+      const result = await service.headObject(storage, 'empty.bin')
+      expect(result).toEqual({ size: 0, contentType: undefined, etag: 'empty-etag' })
     })
 
     it('retries a temporarily missing object', async () => {
@@ -396,7 +420,12 @@ describe('S3Service', () => {
         vi
           .fn()
           .mockResolvedValueOnce(new Response(null, { status: 404 }))
-          .mockResolvedValueOnce(new Response(null, { headers: { 'content-length': '10', etag: '"etag-1"' } })),
+          .mockResolvedValueOnce(
+            new Response(new Uint8Array([1]), {
+              status: 206,
+              headers: { 'content-range': 'bytes 0-0/10', etag: '"etag-1"' },
+            }),
+          ),
       )
 
       const result = service.headObject(storage, 'test.bin')

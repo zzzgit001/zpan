@@ -5,7 +5,6 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
-  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -17,8 +16,8 @@ import type { S3Gateway, S3StorageCredentials } from '../../usecases/ports'
 const DEFAULT_EXPIRES_IN = 3600
 const MULTIPART_PART_SIZE = 5 * 1024 * 1024
 const SMALL_STREAM_PUT_BUFFER_SIZE = 256 * 1024
-const HEAD_MAX_ATTEMPTS = 3
-const HEAD_RETRY_DELAY_MS = 250
+const VERIFY_MAX_ATTEMPTS = 3
+const VERIFY_RETRY_DELAY_MS = 250
 
 export class S3Service implements S3Gateway {
   createClient(storage: S3StorageCredentials): S3Client {
@@ -208,34 +207,36 @@ export class S3Service implements S3Gateway {
     key: string,
   ): Promise<{ size: number; contentType?: string; etag: string }> {
     const client = this.createClient(storage)
-    const url = await getSignedUrl(client, new HeadObjectCommand({ Bucket: storage.bucket, Key: key }), {
+    const url = await getSignedUrl(client, new GetObjectCommand({ Bucket: storage.bucket, Key: key }), {
       expiresIn: DEFAULT_EXPIRES_IN,
     })
     let lastError: Error | undefined
 
-    for (let attempt = 1; attempt <= HEAD_MAX_ATTEMPTS; attempt++) {
+    for (let attempt = 1; attempt <= VERIFY_MAX_ATTEMPTS; attempt++) {
       try {
-        const response = await fetch(url, { method: 'HEAD' })
-        if (response.ok) {
-          const contentLength = Number(response.headers.get('content-length') ?? 0)
+        const response = await fetch(url, { headers: { Range: 'bytes=0-0' } })
+        const rangedSize = response.headers.get('content-range')?.match(/\/(\d+)$/)?.[1]
+        const contentLength = Number(rangedSize ?? response.headers.get('content-length') ?? 0)
+        if (response.ok || (response.status === 416 && contentLength === 0)) {
+          await response.body?.cancel()
           return {
             size: Number.isFinite(contentLength) ? contentLength : 0,
             contentType: response.headers.get('content-type') ?? undefined,
             etag: (response.headers.get('etag') ?? '').replace(/"/g, ''),
           }
         }
-        lastError = new Error(`S3 object HEAD failed: ${response.status}`)
+        lastError = new Error(`S3 object verification failed: ${response.status}`)
         if (response.status !== 404 && response.status < 500) break
       } catch (error) {
         lastError = error as Error
       }
 
-      if (attempt < HEAD_MAX_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, HEAD_RETRY_DELAY_MS * attempt))
+      if (attempt < VERIFY_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, VERIFY_RETRY_DELAY_MS * attempt))
       }
     }
 
-    throw lastError ?? new Error('S3 object HEAD failed')
+    throw lastError ?? new Error('S3 object verification failed')
   }
 
   async getObjectBytes(storage: S3StorageCredentials, key: string, range?: string): Promise<Uint8Array> {
