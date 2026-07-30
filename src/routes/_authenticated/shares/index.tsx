@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
-import { ChevronDown, ClipboardCopy, FileIcon, FolderIcon, Share2, XCircle } from 'lucide-react'
+import { ChevronDown, ClipboardCopy, FileIcon, FolderIcon, Globe2, Lock, Share2, XCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useClipboard } from '@/hooks/use-clipboard'
-import { listReceivedShares, listShares, revokeShare, type ShareListItem } from '@/lib/api'
+import { listReceivedShares, listShares, revokeShare, type ShareListItem, setSharePrivacy } from '@/lib/api'
 
 export const Route = createFileRoute('/_authenticated/shares/')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -46,7 +46,11 @@ function computeDisplayStatus(share: ShareListItem): 'active' | 'revoked' | 'exp
   return 'active'
 }
 
-function SharesPage() {
+function canChangePrivacy(share: ShareListItem): boolean {
+  return share.kind === 'landing' && share.recipientCount === 0 && share.status !== 'revoked'
+}
+
+export function SharesPage() {
   const { t } = useTranslation()
   const { copy } = useClipboard()
   const navigate = useNavigate()
@@ -74,6 +78,16 @@ function SharesPage() {
     onError: () => {
       toast.error(t('shares.revokeError'))
     },
+  })
+
+  const privacyMutation = useMutation({
+    mutationFn: ({ token, private: isPrivate }: { token: string; private: boolean }) =>
+      setSharePrivacy(token, isPrivate),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['shares'] })
+      toast.success(t(variables.private ? 'shares.makePrivateSuccess' : 'shares.makePublicSuccess'))
+    },
+    onError: () => toast.error(t('shares.privacyError')),
   })
 
   const filteredItems = useMemo(() => {
@@ -238,6 +252,8 @@ function SharesPage() {
                       copy(url, 'shares.urlCopied')
                     }}
                     onRevoke={() => setRevokeTarget(share)}
+                    onTogglePrivacy={() => privacyMutation.mutate({ token: share.token, private: !share.private })}
+                    privacyPending={privacyMutation.isPending && privacyMutation.variables?.token === share.token}
                   />
                 ))}
                 {filteredItems.length === 0 && (
@@ -314,12 +330,16 @@ function ShareTableRow({
   onRowClick,
   onCopyUrl,
   onRevoke,
+  onTogglePrivacy,
+  privacyPending,
 }: {
   share: ShareListItem
   displayStatus: 'active' | 'revoked' | 'expired'
   onRowClick: () => void
   onCopyUrl: () => void
   onRevoke: () => void
+  onTogglePrivacy: () => void
+  privacyPending: boolean
 }) {
   const { t } = useTranslation()
 
@@ -383,6 +403,15 @@ function ShareTableRow({
         {/* biome-ignore lint/a11y/noStaticElementInteractions: stop-propagation wrapper for action buttons */}
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: stop-propagation wrapper for action buttons */}
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            disabled={!canChangePrivacy(share) || privacyPending}
+            onClick={onTogglePrivacy}
+            title={t(share.private ? 'shares.makePublic' : 'shares.makePrivate')}
+          >
+            {share.private ? <Globe2 /> : <Lock />}
+          </Button>
           <Button variant="ghost" size="icon-xs" onClick={onCopyUrl} title={t('shares.copyUrl')}>
             <ClipboardCopy />
           </Button>

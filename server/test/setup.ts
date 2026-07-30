@@ -368,9 +368,11 @@ const APP_SCHEMA_SQL = `
     views INTEGER NOT NULL DEFAULT 0,
     downloads INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active',
+    private INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS shares_creator_status_created_idx ON shares(creator_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS shares_creator_private_created_idx ON shares(creator_id, private, created_at);
   CREATE TABLE IF NOT EXISTS share_recipients (
     id TEXT PRIMARY KEY,
     share_id TEXT NOT NULL,

@@ -34,7 +34,6 @@ export function createShareRepo(db: Database): ShareRepo {
       if (input.kind === 'direct' && input.password) throw new CreateShareError('DIRECT_NO_PASSWORD')
       if (input.kind === 'direct' && input.recipients && input.recipients.length > 0)
         throw new CreateShareError('DIRECT_NO_RECIPIENTS')
-
       const matter = await db
         .select()
         .from(matters)
@@ -59,6 +58,7 @@ export function createShareRepo(db: Database): ShareRepo {
         views: 0,
         downloads: 0,
         status: 'active',
+        private: input.private ?? false,
         createdAt: now,
       }
 
@@ -175,6 +175,52 @@ export function createShareRepo(db: Database): ShareRepo {
       return result.length > 0
     },
 
+    async setPrivacy(token: string, creatorId: string, isPrivate: boolean): Promise<boolean> {
+      const result = await db
+        .update(shares)
+        .set({ private: isPrivate })
+        .where(and(eq(shares.token, token), eq(shares.creatorId, creatorId)))
+        .returning({ id: shares.id })
+
+      return result.length > 0
+    },
+
+    async listPublicProfileShares(username: string, now: Date) {
+      const nowSecs = Math.floor(now.getTime() / 1000)
+      const rows = await db
+        .select({
+          token: shares.token,
+          name: matters.name,
+          type: matters.type,
+          size: matters.size,
+          dirtype: matters.dirtype,
+        })
+        .from(shares)
+        .innerJoin(user, eq(shares.creatorId, user.id))
+        .innerJoin(matters, eq(shares.matterId, matters.id))
+        .where(
+          and(
+            eq(user.username, username),
+            eq(shares.private, false),
+            eq(shares.kind, 'landing'),
+            eq(shares.status, 'active'),
+            or(isNull(shares.expiresAt), sql`${shares.expiresAt} > ${nowSecs}`),
+            or(isNull(shares.downloadLimit), sql`${shares.downloads} < ${shares.downloadLimit}`),
+            eq(matters.status, 'active'),
+            isNull(matters.trashedAt),
+            isNull(matters.purgedAt),
+            sql`NOT EXISTS (
+              SELECT 1
+              FROM ${shareRecipients}
+              WHERE ${shareRecipients.shareId} = ${shares.id}
+            )`,
+          ),
+        )
+        .orderBy(desc(shares.createdAt), desc(shares.id))
+
+      return rows.map(({ dirtype, ...row }) => ({ ...row, isFolder: dirtype !== DirType.FILE }))
+    },
+
     async listForApi(
       creatorId: string,
       opts: { page: number; pageSize: number; status?: string },
@@ -200,6 +246,7 @@ export function createShareRepo(db: Database): ShareRepo {
           views: shares.views,
           downloads: shares.downloads,
           status: shares.status,
+          private: shares.private,
           createdAt: shares.createdAt,
           matterName: matters.name,
           matterType: matters.type,
@@ -257,6 +304,7 @@ export function createShareRepo(db: Database): ShareRepo {
           views: shares.views,
           downloads: shares.downloads,
           status: shares.status,
+          private: shares.private,
           createdAt: shares.createdAt,
           matterName: matters.name,
           matterType: matters.type,
@@ -321,9 +369,13 @@ export function createShareRepo(db: Database): ShareRepo {
       return quota.hasQuotaForBytes(orgId, bytes)
     },
 
-    async getCreatorName(creatorId: string): Promise<string | null> {
-      const rows = await db.select({ name: user.name }).from(user).where(eq(user.id, creatorId)).limit(1)
-      return rows[0]?.name ?? null
+    async getCreatorIdentity(creatorId: string) {
+      const rows = await db
+        .select({ name: user.name, username: user.username })
+        .from(user)
+        .where(eq(user.id, creatorId))
+        .limit(1)
+      return rows[0] ?? null
     },
 
     async getUserEmail(userId: string): Promise<string | null> {

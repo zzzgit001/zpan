@@ -16,8 +16,13 @@ import type {
   DownloadTaskActionInput,
   PatchStorageInput,
   PresignObjectUploadPartsInput,
+  PublicProfile,
+  PublicUser,
   RedeemGiftCardResponse,
   ReplaceStorageInput,
+  ShareObjectItem,
+  ShareObjectsResponse,
+  ShareReadmeResponse,
   SiteConfig,
   SiteSettings,
   UpdateDownloaderCreditBillingInput,
@@ -871,18 +876,10 @@ export function testEmail(to: string) {
 
 // Profile API (public, no auth)
 
-export interface PublicUser {
-  username: string
-  name: string
-  image: string | null
-}
-
-export interface PublicMatter extends StorageObject {
-  downloadUrl?: string
-}
+export type { PublicUser }
 
 export function getProfile(username: string) {
-  return unwrap<{ user: PublicUser; shares: PublicMatter[] }>(users[':username'].$get({ param: { username } }))
+  return unwrap<PublicProfile>(users[':username'].$get({ param: { username } }))
 }
 
 // Teams Activity API
@@ -1000,12 +997,19 @@ export function revokeShare(token: string) {
   return unwrap<ShareView>(authedSharesApi[':token'].status.$put({ param: { token }, json: { status: 'revoked' } }))
 }
 
+export function setSharePrivacy(token: string, isPrivate: boolean) {
+  return unwrap<{ private: boolean }>(
+    authedSharesApi[':token'].privacy.$put({ param: { token }, json: { private: isPrivate } }),
+  )
+}
+
 export interface CreateShareResult {
   token: string
   kind: ShareView['kind']
   urls: { landing?: string; direct?: string }
   expiresAt: string | null
   downloadLimit: number | null
+  private: boolean
 }
 
 export function createShare(data: CreateShareRequest) {
@@ -1016,21 +1020,8 @@ export function verifySharePassword(token: string, password: string) {
   return unwrap<{ ok: boolean }>(publicSharesApi[':token'].sessions.$post({ param: { token }, json: { password } }))
 }
 
-export interface ShareChildItem {
-  ref: string
-  name: string
-  type: string
-  size: number
-  isFolder: boolean
-}
-
-export interface ShareChildrenResponse {
-  items: ShareChildItem[]
-  total: number
-  page: number
-  pageSize: number
-  breadcrumb: Array<{ name: string; path: string }>
-}
+export type ShareChildItem = ShareObjectItem
+export type ShareChildrenResponse = ShareObjectsResponse
 
 export function listShareObjects(token: string, parent = '', page = 1, pageSize = 50) {
   return unwrap<ShareChildrenResponse>(
@@ -1039,6 +1030,10 @@ export function listShareObjects(token: string, parent = '', page = 1, pageSize 
       query: { parent, page: String(page), pageSize: String(pageSize) },
     }),
   )
+}
+
+export function getShareReadme(token: string) {
+  return unwrap<ShareReadmeResponse>(publicSharesApi[':token'].readme.$get({ param: { token } }))
 }
 
 export function buildShareObjectUrl(token: string, ref: string): string {

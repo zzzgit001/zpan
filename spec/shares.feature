@@ -69,6 +69,36 @@ Feature: Shares
     When the share is created
     Then the limit is stored
 
+  @shares/create-public @api
+  Scenario: An eligible landing share is public by default
+    Given an authenticated user creating an untargeted landing share
+    When they do not enable private sharing
+    Then the share appears on their public profile
+
+  @shares/privacy-owner @api
+  Scenario: An owner changes an eligible share between public and private
+    Given an owner's untargeted landing share
+    When they enable and disable private sharing
+    Then only the privacy state changes
+
+  @shares/privacy-authorization @api
+  Scenario: Another user cannot change share privacy
+    Given a landing share owned by another user
+    When a non-owner tries to change its privacy
+    Then the API responds 403
+
+  @shares/privacy-ineligible @api
+  Scenario: Direct and recipient-targeted shares do not have configurable privacy
+    Given direct and recipient-targeted shares
+    When privacy requests are submitted
+    Then the API responds 400 SHARE_PRIVACY_INELIGIBLE
+
+  @shares/privacy-preserves-access @api
+  Scenario: Making a share private does not revoke it
+    Given a public landing share
+    When its owner enables private sharing
+    Then its original landing URL remains usable
+
   @shares/create-notify-best-effort @api
   Scenario: Share creation succeeds even if notification fails
     Given share-created notification dispatch rejects

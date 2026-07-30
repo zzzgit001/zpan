@@ -9,6 +9,14 @@ export const shareRecipientSchema = z.object({
   recipientEmail: z.string().email().optional(),
 })
 
+export const shareRecipientViewSchema = z.object({
+  id: z.string(),
+  shareId: z.string(),
+  recipientUserId: z.string().nullable(),
+  recipientEmail: z.string().nullable(),
+  createdAt: z.string(),
+})
+
 export const createShareSchema = z.object({
   matterId: z.string().min(1),
   orgId: z.string().min(1),
@@ -18,9 +26,10 @@ export const createShareSchema = z.object({
   expiresAt: z.date().optional(),
   downloadLimit: z.number().int().positive().optional(),
   recipients: z.array(shareRecipientSchema).optional(),
+  private: z.boolean().default(false),
 })
 
-export type CreateShareInput = z.infer<typeof createShareSchema>
+export type CreateShareInput = z.input<typeof createShareSchema>
 
 export const listSharesQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -36,9 +45,35 @@ export const createShareRequestSchema = z.object({
   expiresAt: z.string().datetime({ offset: true }).optional(),
   downloadLimit: z.number().int().positive().optional(),
   recipients: z.array(shareRecipientSchema).optional(),
+  private: z.boolean().default(false),
 })
 
-export type CreateShareRequest = z.infer<typeof createShareRequestSchema>
+export type CreateShareRequest = z.input<typeof createShareRequestSchema>
+
+export const shareObjectItemSchema = z.object({
+  ref: z.string(),
+  name: z.string(),
+  type: z.string(),
+  size: z.number().int().nullable(),
+  isFolder: z.boolean(),
+})
+
+export const shareObjectsResponseSchema = z.object({
+  items: z.array(shareObjectItemSchema),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  breadcrumb: z.array(z.object({ name: z.string(), path: z.string() })),
+})
+
+export type ShareObjectItem = z.infer<typeof shareObjectItemSchema>
+export type ShareObjectsResponse = z.infer<typeof shareObjectsResponseSchema>
+
+export const shareReadmeResponseSchema = z.object({
+  content: z.string(),
+})
+
+export type ShareReadmeResponse = z.infer<typeof shareReadmeResponseSchema>
 
 export const saveShareRequestSchema = z.object({
   targetOrgId: z.string().min(1),

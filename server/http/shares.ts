@@ -3,7 +3,14 @@ import type { Context } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import { ZPAN_CLOUD_URL_DEFAULT } from '../../shared/constants'
 import { pageSchema } from '../../shared/schemas'
-import { createShareRequestSchema, listSharesQuerySchema, saveShareRequestSchema } from '../../shared/schemas/share'
+import {
+  createShareRequestSchema,
+  listSharesQuerySchema,
+  saveShareRequestSchema,
+  shareObjectsResponseSchema,
+  shareReadmeResponseSchema,
+  shareRecipientViewSchema,
+} from '../../shared/schemas/share'
 import { transferAuditActor } from '../middleware/audit-transfers'
 import { requireAuth, requireTeamRole } from '../middleware/auth'
 import type { Env } from '../middleware/platform'
@@ -13,10 +20,12 @@ import {
   downloadShareObject,
   listShareObjects,
   listShares,
+  readShareReadme,
   revokeShare,
   type ShareCreatorDto,
   type ShareViewerDto,
   saveShare,
+  setSharePrivacy,
   verifySharePassword,
   viewShare,
 } from '../usecases/share'
@@ -46,6 +55,7 @@ const shareViewSchema = z
       isFolder: z.boolean(),
     }),
     creatorName: z.string(),
+    creatorUsername: z.string().nullable(),
     requiresPassword: z.boolean(),
     expired: z.boolean(),
     exhausted: z.boolean(),
@@ -59,7 +69,7 @@ const shareViewSchema = z
     orgId: z.string().optional(),
     creatorId: z.string().optional(),
     createdAt: z.string().optional(),
-    recipients: z.array(z.unknown()).optional(),
+    recipients: z.array(shareRecipientViewSchema).optional(),
   })
   .openapi('ShareView')
 
@@ -72,6 +82,7 @@ function toShareViewDTO(dto: ShareViewerDto | ShareCreatorDto): z.infer<typeof s
     downloadLimit: dto.downloadLimit,
     matter: dto.matter,
     creatorName: dto.creatorName,
+    creatorUsername: dto.creatorUsername,
     requiresPassword: dto.requiresPassword,
     expired: dto.expired,
     exhausted: dto.exhausted,
@@ -88,7 +99,10 @@ function toShareViewDTO(dto: ShareViewerDto | ShareCreatorDto): z.infer<typeof s
       orgId: dto.orgId,
       creatorId: dto.creatorId,
       createdAt: dto.createdAt.toISOString(),
-      recipients: dto.recipients,
+      recipients: dto.recipients.map((recipient) => ({
+        ...recipient,
+        createdAt: recipient.createdAt.toISOString(),
+      })),
     }
   }
   return base
@@ -107,6 +121,7 @@ const shareListItemSchema = z
     views: z.number().int(),
     downloads: z.number().int(),
     status: z.string(),
+    private: z.boolean(),
     createdAt: z.string(),
     matter: z.object({ name: z.string(), type: z.string(), dirtype: z.number().int() }),
     recipientCount: z.number().int(),
@@ -115,20 +130,16 @@ const shareListItemSchema = z
   .openapi('ShareListItem')
 
 function toShareListItemDTO(s: ShareListItem): z.infer<typeof shareListItemSchema> {
-  return { ...s, expiresAt: s.expiresAt ? s.expiresAt.toISOString() : null, createdAt: s.createdAt.toISOString() }
+  return {
+    ...s,
+    expiresAt: s.expiresAt ? s.expiresAt.toISOString() : null,
+    createdAt: s.createdAt.toISOString(),
+  }
 }
 
 const shareListSchema = pageSchema(shareListItemSchema, 'ShareList')
 
-const shareObjectsSchema = z
-  .object({
-    items: z.array(z.unknown()),
-    total: z.number().int(),
-    page: z.number().int(),
-    pageSize: z.number().int(),
-    breadcrumb: z.array(z.object({ name: z.string(), path: z.string() })),
-  })
-  .openapi('ShareObjects')
+const shareObjectsSchema = shareObjectsResponseSchema.openapi('ShareObjects')
 
 const createdShareSchema = z
   .object({
@@ -137,6 +148,7 @@ const createdShareSchema = z
     urls: z.object({ landing: z.string().optional(), direct: z.string().optional() }),
     expiresAt: z.string().nullable(),
     downloadLimit: z.number().int().nullable(),
+    private: z.boolean(),
   })
   .openapi('CreatedShare')
 
@@ -220,6 +232,23 @@ const listShareObjectsRoute = createRoute({
     401: errorResponse('Password required'),
     404: errorResponse('Share not found'),
     410: errorResponse('Share expired or unavailable'),
+  },
+})
+
+const readShareReadmeRoute = createRoute({
+  operationId: 'readShareReadme',
+  summary: 'Read a shared folder README',
+  tags: ['Shares'],
+  method: 'get',
+  path: '/{token}/readme',
+  request: { params: z.object({ token: z.string() }) },
+  responses: {
+    200: jsonContent(shareReadmeResponseSchema, 'README.md content'),
+    400: errorResponse('README.md is not valid UTF-8'),
+    401: errorResponse('Password required'),
+    404: errorResponse('README.md not found'),
+    410: errorResponse('Share expired'),
+    413: errorResponse('README.md is too large'),
   },
 })
 
@@ -334,6 +363,17 @@ export const publicShares = pub
     if (out.ok) return c.json(out.result, 200)
     throw out.error
   })
+  .openapi(readShareReadmeRoute, async (c) => {
+    const token = c.req.valid('param').token
+    const viewerId = await readUserId(c)
+    const out = await readShareReadme(c.get('deps'), {
+      token,
+      viewerId,
+      accessCookie: getCookie(c, cookieName(token)),
+    })
+    if (out.ok) return c.json({ content: out.content }, 200)
+    throw out.error
+  })
 
 // ─── AUTHED SEGMENT ─────────────────────────────────────────────────────────
 const listSharesRoute = createRoute({
@@ -373,6 +413,26 @@ const revokeShareRoute = createRoute({
   },
   responses: {
     200: jsonContent(shareViewSchema, 'Revoked share'),
+    403: errorResponse('Forbidden'),
+    404: errorResponse('Not found'),
+  },
+})
+
+const sharePrivacySchema = z.object({ private: z.boolean() }).openapi('SharePrivacy')
+
+const putSharePrivacyRoute = createRoute({
+  operationId: 'putSharePrivacy',
+  summary: 'Set whether a share is hidden from the owner public profile',
+  tags: ['Shares'],
+  method: 'put',
+  path: '/{token}/privacy',
+  request: {
+    params: z.object({ token: z.string() }),
+    ...jsonBody(sharePrivacySchema),
+  },
+  responses: {
+    200: jsonContent(sharePrivacySchema, 'Share privacy'),
+    400: errorResponse('Share does not have configurable privacy'),
     403: errorResponse('Forbidden'),
     404: errorResponse('Not found'),
   },
@@ -420,10 +480,20 @@ export const authedShares = authedApp
           urls: shareUrls(out.share.kind, out.share.token),
           expiresAt: out.share.expiresAt ? out.share.expiresAt.toISOString() : null,
           downloadLimit: out.share.downloadLimit,
+          private: out.share.private,
         },
         201,
       )
     }
+    throw out.error
+  })
+  .openapi(putSharePrivacyRoute, async (c) => {
+    const out = await setSharePrivacy(c.get('deps'), {
+      token: c.req.valid('param').token,
+      userId: c.get('userId')!,
+      private: c.req.valid('json').private,
+    })
+    if (out.ok) return c.json({ private: out.private }, 200)
     throw out.error
   })
   .openapi(revokeShareRoute, async (c) => {

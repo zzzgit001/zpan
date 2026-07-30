@@ -132,13 +132,26 @@ export type { ListNotificationsQuery } from './notification'
 export { listNotificationsQuerySchema } from './notification'
 export type { Page, PageQuery } from './pagination'
 export { pageQuerySchema, pageSchema } from './pagination'
-export type { CreateShareInput, CreateShareRequest, ShareKind } from './share'
+export type { PublicProfile, PublicProfileShare, PublicUser } from './profile'
+export { publicProfileSchema, publicProfileShareSchema, publicUserSchema } from './profile'
+export type {
+  CreateShareInput,
+  CreateShareRequest,
+  ShareKind,
+  ShareObjectItem,
+  ShareObjectsResponse,
+  ShareReadmeResponse,
+} from './share'
 export {
   createShareRequestSchema,
   createShareSchema,
   listSharesQuerySchema,
   shareKindSchema,
+  shareObjectItemSchema,
+  shareObjectsResponseSchema,
+  shareReadmeResponseSchema,
   shareRecipientSchema,
+  shareRecipientViewSchema,
 } from './share'
 export type {
   SiteBranding,

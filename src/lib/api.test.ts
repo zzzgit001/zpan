@@ -58,6 +58,7 @@ import {
   getProfile,
   getSession,
   getShare,
+  getShareReadme,
   getSiteConfig,
   getSiteInvitation,
   getSiteSettings,
@@ -128,6 +129,7 @@ import {
   saveShareToDrive,
   sendDownloaderHeartbeat,
   serverEventsUrl,
+  setSharePrivacy,
   testEmail,
   transferObject,
   updateAnnouncement,
@@ -2330,32 +2332,26 @@ describe('api', () => {
   })
 
   describe('getProfile', () => {
-    it('fetches public profile by username', async () => {
+    it('gets the exact public profile path and returns its concrete share items', async () => {
       const payload = {
         user: { username: 'alice', name: 'Alice', image: null },
-        shares: [],
+        shares: [{ token: 'share-1', name: 'photo.jpg', type: 'image/jpeg', size: 42, isFolder: false }],
       }
       vi.mocked(fetch).mockResolvedValueOnce(makeResponse(payload))
 
       const result = await getProfile('alice')
 
       expect(result).toEqual(payload)
-      const [url] = vi.mocked(fetch).mock.calls[0] as [string]
-      expect(url).toContain('/api/users/alice')
-    })
-
-    it('returns shares with download URLs', async () => {
-      const matter = { id: 'm1', name: 'photo.jpg', dirtype: 0, downloadUrl: 'https://s3/photo.jpg' }
-      const payload = {
-        user: { username: 'bob', name: 'Bob', image: null },
-        shares: [matter],
-      }
-      vi.mocked(fetch).mockResolvedValueOnce(makeResponse(payload))
-
-      const result = await getProfile('bob')
-
-      expect(result.shares).toHaveLength(1)
-      expect(result.shares[0].downloadUrl).toBe('https://s3/photo.jpg')
+      const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit]
+      expect(url).toBe('/api/users/alice')
+      expect(init.method).toBe('GET')
+      expect(result.shares[0]).toEqual({
+        token: 'share-1',
+        name: 'photo.jpg',
+        type: 'image/jpeg',
+        size: 42,
+        isFolder: false,
+      })
     })
 
     it('throws on 404 response', async () => {
@@ -2658,6 +2654,7 @@ describe('api', () => {
         downloadLimit: null,
         matter: { name: 'photo.jpg', type: 'image/jpeg', size: 1024, isFolder: false },
         creatorName: 'Alice',
+        creatorUsername: 'alice',
         requiresPassword: false,
         expired: false,
         exhausted: false,
@@ -2712,25 +2709,46 @@ describe('api', () => {
     })
   })
 
+  describe('share privacy', () => {
+    it('updates privacy with PUT on the exact resource path', async () => {
+      const payload = { private: true }
+      vi.mocked(fetch).mockResolvedValueOnce(makeResponse(payload))
+
+      await expect(setSharePrivacy('tok123', true)).resolves.toEqual(payload)
+
+      const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit]
+      expect(url).toBe('/api/shares/tok123/privacy')
+      expect(init.method).toBe('PUT')
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : null
+      expect(body).toEqual({ private: true })
+    })
+
+    it('surfaces privacy errors', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ error: 'Forbidden' }, false, 403))
+      await expect(setSharePrivacy('tok123', true)).rejects.toBeInstanceOf(ApiError)
+    })
+  })
+
   describe('createShare', () => {
-    it('posts share data to /api/shares and returns created share result', async () => {
+    it('posts the privacy flag to the exact share collection path', async () => {
       const payload = {
         token: 'tok123',
         kind: 'landing' as const,
         urls: { landing: 'https://zpan.io/s/tok123' },
         expiresAt: null,
         downloadLimit: null,
+        private: true,
       }
       vi.mocked(fetch).mockResolvedValueOnce(makeResponse(payload))
 
-      const result = await createShare({ matterId: 'obj-1', kind: 'landing' })
+      const result = await createShare({ matterId: 'obj-1', kind: 'landing', private: true })
 
       expect(result).toEqual(payload)
       const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit]
-      expect(url).toContain('/api/shares')
+      expect(url).toBe('/api/shares')
       expect(init.method).toBe('POST')
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : null
-      expect(body).toMatchObject({ matterId: 'obj-1', kind: 'landing' })
+      expect(body).toEqual({ matterId: 'obj-1', kind: 'landing', private: true })
       const headers =
         init.headers instanceof Headers ? init.headers : new Headers(init.headers as Record<string, string>)
       expect(headers.get('Content-Type')).toContain('application/json')
@@ -2794,6 +2812,26 @@ describe('api', () => {
       vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ error: 'Password required' }, false, 401))
 
       await expect(listShareObjects('tok123')).rejects.toThrow('Password required')
+    })
+  })
+
+  describe('getShareReadme', () => {
+    it('calls GET /api/shares/:token/readme and returns Markdown content', async () => {
+      const payload = { content: '# Shared folder' }
+      vi.mocked(fetch).mockResolvedValueOnce(makeResponse(payload))
+
+      const result = await getShareReadme('tok123')
+
+      expect(result).toEqual(payload)
+      const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit]
+      expect(url).toContain('/api/shares/tok123/readme')
+      expect(init.method).toBe('GET')
+    })
+
+    it('throws ApiError when README.md is missing', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ error: 'README.md not found' }, false, 404))
+
+      await expect(getShareReadme('tok123')).rejects.toThrow('README.md not found')
     })
   })
 

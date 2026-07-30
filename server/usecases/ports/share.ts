@@ -1,3 +1,4 @@
+import type { PublicProfileShare } from '@shared/schemas/profile'
 import type { CreateShareInput } from '@shared/schemas/share'
 import type { Matter } from './matter'
 
@@ -18,6 +19,7 @@ export interface ShareRecord {
   views: number
   downloads: number
   status: string
+  private: boolean
   createdAt: Date
 }
 
@@ -41,10 +43,16 @@ export interface ShareListItem {
   views: number
   downloads: number
   status: string
+  private: boolean
   createdAt: Date
   matter: { name: string; type: string; dirtype: number }
   recipientCount: number
   creatorName?: string
+}
+
+export interface ShareCreatorIdentity {
+  name: string
+  username: string | null
 }
 
 export type ShareResolution =
@@ -73,6 +81,8 @@ export interface ShareRepo {
   listRecipientUserIds(shareId: string): Promise<string[]>
   revokeByMatter(matterId: string): Promise<void>
   revokeByToken(token: string, creatorId: string): Promise<boolean>
+  setPrivacy(token: string, creatorId: string, isPrivate: boolean): Promise<boolean>
+  listPublicProfileShares(username: string, now: Date): Promise<PublicProfileShare[]>
   listForApi(
     creatorId: string,
     opts: { page: number; pageSize: number; status?: string },
@@ -89,7 +99,7 @@ export interface ShareRepo {
   hasQuotaForBytes(orgId: string, bytes: number): Promise<boolean>
   // Lookups the share routes need; co-located here while user/matter are
   // unmigrated so the share http layer holds no drizzle.
-  getCreatorName(creatorId: string): Promise<string | null>
+  getCreatorIdentity(creatorId: string): Promise<ShareCreatorIdentity | null>
   getUserEmail(userId: string): Promise<string | null>
   getMatterName(matterId: string): Promise<string | null>
   findShareChildMatter(

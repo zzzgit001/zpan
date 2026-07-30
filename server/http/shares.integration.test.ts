@@ -257,6 +257,51 @@ describe('POST /api/shares', () => {
     expect(body.downloadLimit).toBe(5)
   })
 
+  it('creates an eligible landing share as public by default [spec: shares/create-public]', async () => {
+    const { app, db } = await createTestApp()
+    const headers = await authedHeaders(app)
+    await insertStorage(db)
+    const orgId = await getOrgId(db)
+    await insertFile(db, orgId, { id: 'profile-create', name: 'homepage.txt' })
+
+    const res = await createShare(app, headers, {
+      matterId: 'profile-create',
+      kind: 'landing',
+    })
+
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { token: string; private: boolean }
+    expect(body.private).toBe(false)
+    const rows = await db
+      .select({ private: shares.private, status: shares.status })
+      .from(shares)
+      .where(eq(shares.token, body.token))
+    expect(rows[0]).toEqual({ private: false, status: 'active' })
+  })
+
+  it('accepts private creation without changing direct or targeted eligibility', async () => {
+    const { app, db } = await createTestApp()
+    const headers = await authedHeaders(app)
+    await insertStorage(db)
+    const orgId = await getOrgId(db)
+    await insertFile(db, orgId, { id: 'profile-ineligible', name: 'private.txt' })
+
+    const direct = await createShare(app, headers, {
+      matterId: 'profile-ineligible',
+      kind: 'direct',
+      private: true,
+    })
+    expect(direct.status).toBe(201)
+
+    const targeted = await createShare(app, headers, {
+      matterId: 'profile-ineligible',
+      kind: 'landing',
+      recipients: [{ recipientEmail: 'private@example.com' }],
+      private: true,
+    })
+    expect(targeted.status).toBe(201)
+  })
+
   it('returns 400 with DIRECT_NO_RECIPIENTS when creating direct share with recipients [spec: shares/direct-no-recipients]', async () => {
     const { app, db } = await createTestApp()
     const headers = await authedHeaders(app)
@@ -303,6 +348,77 @@ describe('POST /api/shares', () => {
       recipients: [{ recipientEmail: 'someone@example.com' }],
     })
     expect(res.status).toBe(201)
+  })
+})
+
+// ─── PUT /api/shares/:token/privacy ──────────────────────────────────────────
+
+function privacyRequest(app: TestApp, token: string, isPrivate: boolean, headers?: Record<string, string>) {
+  return app.request(`/api/shares/${token}/privacy`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ private: isPrivate }),
+  })
+}
+
+describe('share privacy mutation', () => {
+  it('requires authentication', async () => {
+    const { app } = await createTestApp()
+    expect((await privacyRequest(app, 'unknown', true)).status).toBe(401)
+  })
+
+  it('lets only the owner make a landing share private or public without revoking it [spec: shares/privacy-owner] [spec: shares/privacy-authorization] [spec: shares/privacy-preserves-access]', async () => {
+    const { app, db } = await createTestApp()
+    const ownerHeaders = await authedHeaders(app, `profile-owner-${nanoid()}@example.com`)
+    await insertStorage(db)
+    const ownerOrgId = await getOrgId(db)
+    await insertFile(db, ownerOrgId, { id: 'profile-toggle', name: 'toggle.txt' })
+    const created = await createShare(app, ownerHeaders, { matterId: 'profile-toggle', kind: 'landing' })
+    const token = ((await created.json()) as { token: string }).token
+    const otherHeaders = await authedHeaders(app, `profile-other-${nanoid()}@example.com`)
+
+    expect((await privacyRequest(app, token, true, otherHeaders)).status).toBe(403)
+
+    const madePrivate = await privacyRequest(app, token, true, ownerHeaders)
+    expect(madePrivate.status).toBe(200)
+    expect(await madePrivate.json()).toEqual({ private: true })
+
+    const madePublic = await privacyRequest(app, token, false, ownerHeaders)
+    expect(madePublic.status).toBe(200)
+    expect(await madePublic.json()).toEqual({ private: false })
+    const rows = await db
+      .select({ private: shares.private, status: shares.status })
+      .from(shares)
+      .where(eq(shares.token, token))
+    expect(rows[0]).toEqual({ private: false, status: 'active' })
+
+    const landing = await app.request(`/api/shares/${token}`)
+    expect(landing.status).toBe(200)
+  })
+
+  it('rejects privacy mutations for direct and recipient-targeted shares [spec: shares/privacy-ineligible]', async () => {
+    const { app, db } = await createTestApp()
+    const headers = await authedHeaders(app, `profile-ineligible-owner-${nanoid()}@example.com`)
+    await insertStorage(db)
+    const orgId = await getOrgId(db)
+    await insertFile(db, orgId, { id: 'profile-direct-toggle', name: 'direct.txt' })
+    await insertFile(db, orgId, { id: 'profile-targeted-toggle', name: 'targeted.txt' })
+
+    const directCreated = await createShare(app, headers, { matterId: 'profile-direct-toggle', kind: 'direct' })
+    const directToken = ((await directCreated.json()) as { token: string }).token
+    const targetedCreated = await createShare(app, headers, {
+      matterId: 'profile-targeted-toggle',
+      kind: 'landing',
+      recipients: [{ recipientEmail: 'recipient@example.com' }],
+    })
+    const targetedToken = ((await targetedCreated.json()) as { token: string }).token
+
+    for (const token of [directToken, targetedToken]) {
+      const res = await privacyRequest(app, token, true, headers)
+      expect(res.status).toBe(400)
+      const body = (await res.json()) as { error: { details: Array<{ reason: string }> } }
+      expect(body.error.details[0]?.reason).toBe('SHARE_PRIVACY_INELIGIBLE')
+    }
   })
 })
 
@@ -1147,6 +1263,7 @@ describe('Public share routes', () => {
       await insertStorage(db)
       const orgId = await getOrgId(db)
       const creatorId = await getUserId(db)
+      await db.run(sql`UPDATE user SET username = 'public-owner' WHERE id = ${creatorId}`)
       await insertFile(db, orgId, { id: 'f1', name: 'photo.jpg' })
       const share = await createShareRepo(db).create({ matterId: 'f1', orgId, creatorId, kind: 'landing' })
 
@@ -1164,6 +1281,8 @@ describe('Public share routes', () => {
       expect(body.expired).toBe(false)
       expect(body.exhausted).toBe(false)
       expect(body.accessibleByUser).toBe(false)
+      expect(body.creatorName).toBe('Test User')
+      expect(body.creatorUsername).toBe('public-owner')
       expect(typeof body.rootRef).toBe('string')
       // Non-creator must not see internal ids
       expect(body.matterId).toBeUndefined()
@@ -1733,6 +1852,51 @@ describe('Public share routes', () => {
       const body = (await res.json()) as { error: { message: string; status: string } }
       expect(body.error.message).toBe('Storage not found')
       expect(body.error.status).toBe('NOT_FOUND')
+    })
+  })
+
+  // ─── GET /api/shares/:token/readme ──────────────────────────────────────────
+
+  describe('GET /api/shares/:token/readme', () => {
+    it('returns the root README.md content without authentication', async () => {
+      const { app, db } = await createTestApp()
+      await authedHeaders(app)
+      await insertStorage(db)
+      const orgId = await getOrgId(db)
+      const creatorId = await getUserId(db)
+      await insertFolder(db, orgId, { id: 'readme-root', name: 'Docs' })
+      await insertFile(db, orgId, { id: 'readme-file', name: 'README.md', parent: 'Docs' })
+      const share = await createShareRepo(db).create({
+        matterId: 'readme-root',
+        orgId,
+        creatorId,
+        kind: 'landing',
+      })
+      vi.spyOn(S3Service.prototype, 'getObjectBytes').mockResolvedValue(new TextEncoder().encode('# Shared docs'))
+
+      const res = await app.request(`/api/shares/${share.token}/readme`)
+
+      expect(res.status).toBe(200)
+      await expect(res.json()).resolves.toEqual({ content: '# Shared docs' })
+    })
+
+    it('returns 404 when the shared folder has no root README.md', async () => {
+      const { app, db } = await createTestApp()
+      await authedHeaders(app)
+      await insertStorage(db)
+      const orgId = await getOrgId(db)
+      const creatorId = await getUserId(db)
+      await insertFolder(db, orgId, { id: 'no-readme-root', name: 'Empty Docs' })
+      const share = await createShareRepo(db).create({
+        matterId: 'no-readme-root',
+        orgId,
+        creatorId,
+        kind: 'landing',
+      })
+
+      const res = await app.request(`/api/shares/${share.token}/readme`)
+
+      expect(res.status).toBe(404)
     })
   })
 
