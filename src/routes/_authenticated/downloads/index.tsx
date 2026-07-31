@@ -181,6 +181,7 @@ function DownloadsPage() {
   const [panelDrag, setPanelDrag] = useState<PanelDragState | null>(null)
   const panelsRef = useRef<HTMLDivElement>(null)
   const tableFrameRef = useRef<HTMLElement>(null)
+  const createSubmissionRef = useRef(false)
   const [tableFrameWidth, setTableFrameWidth] = useState(0)
   const categoryFilterValue = filterCategory.trim() || undefined
   const tagFilterValue = filterTag.trim() || undefined
@@ -302,6 +303,9 @@ function DownloadsPage() {
       toast.success(t('downloads.createSuccess'))
     },
     onError: (err) => toast.error(err.message),
+    onSettled: () => {
+      createSubmissionRef.current = false
+    },
   })
 
   const actionMutation = useMutation({
@@ -320,7 +324,10 @@ function DownloadsPage() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (createSubmissionRef.current) return
+    createSubmissionRef.current = true
     createMutation.mutate({
+      idempotencyKey: crypto.randomUUID(),
       source: { type: sourceType, uri: uri.trim() },
       targetFolder: targetFolder.trim(),
       name: name.trim() || undefined,

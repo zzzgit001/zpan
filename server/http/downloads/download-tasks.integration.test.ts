@@ -168,6 +168,35 @@ async function claimTaskForDownloader(
 }
 
 describe('Download tasks API integration', () => {
+  it('returns the same task for concurrent create requests with the same idempotency key', async () => {
+    const { app, db } = await createTestApp({ DOWNLOAD_TOKEN_SECRET: 'test-download-token-secret' })
+    const user = await authedHeaders(app, 'idempotent-download@example.com')
+    const idempotencyKey = '019fbd0c-c94c-7a52-bec2-d59ee06a4bf6'
+    const request = {
+      method: 'POST',
+      headers: { ...user, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        idempotencyKey,
+        source: { type: 'http', uri: 'https://example.com/file.zip' },
+        targetFolder: '',
+      }),
+    }
+
+    const [first, second] = await Promise.all([
+      app.request('/api/downloads/tasks', request),
+      app.request('/api/downloads/tasks', request),
+    ])
+
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(201)
+    await expect(first.json()).resolves.toMatchObject({ id: idempotencyKey })
+    await expect(second.json()).resolves.toMatchObject({ id: idempotencyKey })
+    const rows = await db.all<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM download_tasks WHERE id = ${idempotencyKey}`,
+    )
+    expect(rows).toEqual([{ count: 1 }])
+  })
+
   it('registers a downloader through BetterAuth device login [spec: download-tasks/register-downloader]', async () => {
     const { app, db } = await createTestApp({ DOWNLOAD_TOKEN_SECRET: 'test-download-token-secret' })
     await insertStorage(db)

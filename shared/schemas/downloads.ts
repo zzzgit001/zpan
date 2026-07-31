@@ -327,6 +327,7 @@ const targetFolderSchema = z
   .refine((value) => !value.split('/').includes('..'), { message: 'Target folder cannot contain ..' })
 
 export const createDownloadTaskSchema = z.object({
+  idempotencyKey: z.string().uuid().optional(),
   source: z
     .object({
       type: downloadSourceTypeSchema,

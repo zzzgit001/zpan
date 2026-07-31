@@ -154,4 +154,14 @@ describe('createDownloadTaskSchema', () => {
 
     expect(result.success).toBe(false)
   })
+
+  it('accepts a UUID idempotency key', () => {
+    const result = createDownloadTaskSchema.safeParse({
+      idempotencyKey: '019fbd0c-c94c-7a52-bec2-d59ee06a4bf6',
+      source: { type: 'http', uri: 'https://example.com/file.zip' },
+      targetFolder: '',
+    })
+
+    expect(result.success).toBe(true)
+  })
 })

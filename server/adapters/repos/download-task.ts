@@ -302,39 +302,42 @@ export function createDownloadTaskRepo(db: Database): DownloadTaskRepo {
 
   return {
     async insert(input: CreateDownloadTaskRecordInput) {
-      await db.insert(downloadTasks).values({
-        id: input.id,
-        orgId: input.orgId,
-        createdByUserId: input.createdByUserId,
-        sourceType: input.sourceType,
-        sourceUri: input.sourceUri,
-        displayName: input.displayName,
-        targetFolder: input.targetFolder,
-        category: input.category,
-        tags: JSON.stringify(input.tags),
-        assignedDownloaderId: input.assignedDownloaderId,
-        status: input.status,
-        events: JSON.stringify([
-          {
-            id: `initial:${input.id}`,
-            type: 'status_changed',
-            occurredAt: input.now.getTime(),
-            attempt: 1,
-            from: null,
-            to: input.status,
-            reason: null,
-            category: input.category ?? 'uncategorized',
-            downloaderId: input.assignedDownloaderId,
-            transferredBytes: null,
-            billedBytes: 0,
-            errorCode: null,
-            errorMessage: null,
-          },
-        ]),
-        createdAt: input.now,
-        updatedAt: input.now,
-        assignedAt: input.assignedAt,
-      })
+      await db
+        .insert(downloadTasks)
+        .values({
+          id: input.id,
+          orgId: input.orgId,
+          createdByUserId: input.createdByUserId,
+          sourceType: input.sourceType,
+          sourceUri: input.sourceUri,
+          displayName: input.displayName,
+          targetFolder: input.targetFolder,
+          category: input.category,
+          tags: JSON.stringify(input.tags),
+          assignedDownloaderId: input.assignedDownloaderId,
+          status: input.status,
+          events: JSON.stringify([
+            {
+              id: `initial:${input.id}`,
+              type: 'status_changed',
+              occurredAt: input.now.getTime(),
+              attempt: 1,
+              from: null,
+              to: input.status,
+              reason: null,
+              category: input.category ?? 'uncategorized',
+              downloaderId: input.assignedDownloaderId,
+              transferredBytes: null,
+              billedBytes: 0,
+              errorCode: null,
+              errorMessage: null,
+            },
+          ]),
+          createdAt: input.now,
+          updatedAt: input.now,
+          assignedAt: input.assignedAt,
+        })
+        .onConflictDoNothing({ target: downloadTasks.id })
     },
 
     async list(filters: ListDownloadTasksFilters) {

@@ -284,7 +284,7 @@ export async function createDownloadTask(
     folderPath: input.targetFolder,
   })
   const now = new Date()
-  const id = nanoid()
+  const id = input.idempotencyKey ?? nanoid()
   await deps.downloadTasks.insert({
     id,
     orgId,
