@@ -1215,6 +1215,7 @@
   "common.copy": "Copy",
   "common.close": "Close",
   "common.clear": "Clear",
+  "common.clearSelection": "Clear selection",
   "common.loading": "Loading...",
   "common.error": "Error",
   "common.success": "Success",

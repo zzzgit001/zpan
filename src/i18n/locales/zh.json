@@ -1215,6 +1215,7 @@
   "common.copy": "复制",
   "common.close": "关闭",
   "common.clear": "清除",
+  "common.clearSelection": "取消选择",
   "common.loading": "加载中...",
   "common.error": "错误",
   "common.success": "成功",

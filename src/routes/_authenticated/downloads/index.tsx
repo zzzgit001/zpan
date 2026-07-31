@@ -1017,7 +1017,7 @@ function BulkTaskActions({
         className="h-7 px-2 text-xs text-muted-foreground"
         onClick={onClear}
       >
-        {t('common.clear')}
+        {t('common.clearSelection')}
       </Button>
     </div>
   )
